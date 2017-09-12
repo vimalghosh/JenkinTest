@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:secure-property-placeholder="http://www.mulesoft.org/schema/mule/secure-property-placeholder"
+	xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" 
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.mulesoft.org/schema/mule/secure-property-placeholder http://www.mulesoft.org/schema/mule/secure-property-placeholder/current/mule-secure-property-placeholder.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd
+http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd">
+
+    <secure-property-placeholder:config name="Secure_Property_Placeholder" key="${master.key}"
+    	location="app.${mule.env}.properties" doc:name="Secure Property Placeholder" encryptionAlgorithm="Twofish"/>
+    
+
+    <flow name="gaming-fa-etl-checkcashFlow">
+        <file:inbound-endpoint path="${app.inboundFileLoc}" responseTimeout="10000" doc:name="File"/>
+        <choice doc:name="File Router">
+            <when expression="#[message.inboundProperties.originalFilename contains &quot;FEES&quot;]">
+                <logger message="FEES FILE" level="INFO" doc:name="Logger"/>
+                <set-session-variable variableName="DisplayName" value="FEES" doc:name="DisplayName"/>
+                <vm:outbound-endpoint exchange-pattern="one-way" path="Feesdatatransform" doc:name="VM Feesdatatransform"/>
+            </when>
+            <otherwise>
+                <logger message="INVALID FORMAT" level="INFO" doc:name="Logger"/>
+                <vm:outbound-endpoint exchange-pattern="one-way" path="dlq-path" doc:name="VM dlq-path"/>
+            </otherwise>
+        </choice>
+    </flow>
+    <flow name="FEES-data-transform">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="Feesdatatransform" doc:name="VM"/>
+        <logger message="#[payload]" level="INFO" doc:name="Logger"/>
+        <dw:transform-message doc:name="Transform Message" metadata:id="44154148-4977-493a-a111-9ab34298c806">
+            <dw:input-payload doc:sample="examples\08272017 FEES.csv" mimeType="application/csv">
+                <dw:reader-property name="header" value="false"/>
+            </dw:input-payload>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/csv
+---
+payload map ((payload01 , indexOfPayload01) -> {
+	FeesCard: payload01.column_3,
+	FeesName: payload01.column_4,
+	FeesAmountPaid: payload01.column_5,
+	FeesDate: payload01.column_6 as :string,
+	FeesTotal: payload01.column_7,
+	FeesDiscount: payload01.column_8
+})]]></dw:set-payload>
+        </dw:transform-message>
+        <file:outbound-endpoint path="${app.outboundFileLoc}" outputPattern="outbound.csv" responseTimeout="10000" doc:name="File"/>
+    </flow>
+    <flow name="DLQ">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="dlq-path" doc:name="VM"/>
+        <logger message="#[message]" level="INFO" doc:name="Logger"/>
+        <file:outbound-endpoint path="${app.dlqFileLoc}" outputPattern="#[message.inboundProperties.filename]" responseTimeout="10000" doc:name="File"/>
+    </flow>
+</mule>
